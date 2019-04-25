@@ -23,7 +23,7 @@ func unmarshalToTransaction(r *http.Request, txn *models.Transaction) error {
 	if err != nil {
 		return err
 	}
-	var validKey = regexp.MustCompile(`^[a-z_A-Z]+$`)
+	var validKey = regexp.MustCompile(`^[a-z_A-Z0-9]+$`)
 	for key := range txn.Data {
 		if !validKey.MatchString(key) {
 			return fmt.Errorf("Invalid key in data json: %v", key)

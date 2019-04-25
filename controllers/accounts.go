@@ -64,7 +64,7 @@ func unmarshalToAccount(r *http.Request, account *models.Account) error {
 	if err != nil {
 		return err
 	}
-	var validKey = regexp.MustCompile(`^[a-z_A-Z]+$`)
+	var validKey = regexp.MustCompile(`^[a-z_A-Z0-9]+$`)
 	for key := range account.Data {
 		if !validKey.MatchString(key) {
 			return fmt.Errorf("Invalid key in data json: %v", key)
