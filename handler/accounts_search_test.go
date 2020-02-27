@@ -1,4 +1,4 @@
-package controllers
+package handler
 
 import (
 	"bytes"
@@ -10,8 +10,7 @@ import (
 	"os"
 	"testing"
 
-	ledgerContext "github.com/RealImage/QLedger/context"
-	"github.com/RealImage/QLedger/middlewares"
+	"github.com/RealImage/QLedger/controller"
 	"github.com/RealImage/QLedger/models"
 
 	_ "github.com/lib/pq"
@@ -25,7 +24,7 @@ var (
 
 type AccountsSearchSuite struct {
 	suite.Suite
-	context *ledgerContext.AppContext
+	handler Service
 }
 
 func (as *AccountsSearchSuite) SetupTest() {
@@ -37,7 +36,14 @@ func (as *AccountsSearchSuite) SetupTest() {
 		log.Panic("Unable to connect to Database:", err)
 	}
 	log.Println("Successfully established connection to database.")
-	as.context = &ledgerContext.AppContext{DB: db}
+	searchEngine, appErr := models.NewSearchEngine(db, models.SearchNamespaceAccounts)
+	if appErr != nil {
+		t.Fatal(appErr)
+	}
+	accountsDB := models.NewAccountDB(db)
+	transactionsDB := models.NewTransactionDB(db)
+	ctrl := controller.NewController(searchEngine, &accountsDB, &transactionsDB)
+	as.handler = Service{Ctrl: ctrl}
 
 	// Create test accounts
 	accDB := models.NewAccountDB(db)
@@ -87,13 +93,12 @@ func (as *AccountsSearchSuite) TestAccountsSearch() {
             }
         }
     }`
-	handler := middlewares.ContextMiddleware(GetAccounts, as.context)
 	req, err := http.NewRequest("GET", AccountSearchAPI, bytes.NewBufferString(payload))
 	if err != nil {
 		t.Fatal(err)
 	}
 	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	as.handler.GetAccounts(rr, req)
 	assert.Equal(t, http.StatusOK, rr.Code, "Invalid response code")
 
 	var accounts []models.AccountResult

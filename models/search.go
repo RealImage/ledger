@@ -58,7 +58,7 @@ func NewSearchEngine(db *sql.DB, namespace string) (*SearchEngine, ledgerError.A
 	return &SearchEngine{db: db, namespace: namespace}, nil
 }
 
-// Query returns the results of a searc query
+// Query returns the results of a search query
 func (engine *SearchEngine) Query(q string) (interface{}, ledgerError.ApplicationError) {
 	rawQuery, aerr := NewSearchRawQuery(q)
 	if aerr != nil {
@@ -196,7 +196,7 @@ func (rawQuery *SearchRawQuery) ToSQLQuery(namespace string) *SearchSQLQuery {
 	case SearchNamespaceAccounts:
 		q = "SELECT id, balance, data FROM current_balances"
 	case SearchNamespaceTransactions:
-		q = `SELECT id, timestamp, data,
+		q = `SELECT transactions.id, timestamp, data,
 					array_to_json(ARRAY(
 						SELECT lines.account_id FROM lines
 							WHERE transaction_id=transactions.id
@@ -207,7 +207,8 @@ func (rawQuery *SearchRawQuery) ToSQLQuery(namespace string) *SearchSQLQuery {
 							WHERE transaction_id=transactions.id
 							ORDER BY lines.account_id
 					)) AS delta_array
-			FROM transactions`
+			FROM transactions
+			LEFT JOIN lines ON lines.transaction_id = transactions.id`
 	default:
 		return nil
 	}
@@ -262,6 +263,7 @@ func (rawQuery *SearchRawQuery) ToSQLQuery(namespace string) *SearchSQLQuery {
 	}
 
 	if namespace == SearchNamespaceTransactions {
+		q += " GROUP BY transactions.id"
 		if rawQuery.SortTime == SortDescByTime {
 			q += " ORDER BY timestamp DESC"
 		} else {

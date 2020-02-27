@@ -6,10 +6,9 @@ import (
 	"net/http"
 	"os"
 
-	ledgerContext "github.com/RealImage/QLedger/context"
-	"github.com/RealImage/QLedger/controllers"
-	"github.com/RealImage/QLedger/middlewares"
-	"github.com/julienschmidt/httprouter"
+	"github.com/RealImage/QLedger/controller"
+	"github.com/RealImage/QLedger/handler"
+	"github.com/RealImage/QLedger/models"
 	"github.com/mattes/migrate"
 	"github.com/mattes/migrate/database"
 	"github.com/mattes/migrate/database/postgres"
@@ -32,42 +31,22 @@ func main() {
 	// Migrate DB changes
 	migrateDB(db)
 
-	appContext := &ledgerContext.AppContext{DB: db}
-	router := httprouter.New()
+	accSearchEngine, appErr := models.NewSearchEngine(db, models.SearchNamespaceAccounts)
+	if appErr != nil {
+		log.Fatal(appErr)
+	}
 
+	trSearchEngine, appErr := models.NewSearchEngine(db, models.SearchNamespaceTransactions)
+	if appErr != nil {
+		log.Fatal(appErr)
+	}
+
+	accountDB := models.NewAccountDB(db)
+	transactionDB := models.NewTransactionDB(db)
+	accCtrl := controller.NewController(accSearchEngine, &accountDB, &transactionDB)
+	trCtrl := controller.NewController(trSearchEngine, &accountDB, &transactionDB)
 	hostPrefix := os.Getenv("HOST_PREFIX")
-	// Monitors
-	router.HandlerFunc(http.MethodGet, hostPrefix+"/ping", controllers.Ping)
-
-	// Create accounts and transactions
-	router.HandlerFunc(http.MethodPost, hostPrefix+"/v1/accounts",
-		middlewares.TokenAuthMiddleware(
-			middlewares.ContextMiddleware(controllers.AddAccount, appContext)))
-	router.HandlerFunc(http.MethodPost, hostPrefix+"/v1/transactions",
-		middlewares.TokenAuthMiddleware(
-			middlewares.ContextMiddleware(controllers.MakeTransaction, appContext)))
-
-	// Read or search accounts and transactions
-	router.HandlerFunc(http.MethodGet, hostPrefix+"/v1/accounts",
-		middlewares.TokenAuthMiddleware(
-			middlewares.ContextMiddleware(controllers.GetAccounts, appContext)))
-	router.HandlerFunc(http.MethodPost, hostPrefix+"/v1/accounts/_search",
-		middlewares.TokenAuthMiddleware(
-			middlewares.ContextMiddleware(controllers.GetAccounts, appContext)))
-	router.HandlerFunc(http.MethodGet, hostPrefix+"/v1/transactions",
-		middlewares.TokenAuthMiddleware(
-			middlewares.ContextMiddleware(controllers.GetTransactions, appContext)))
-	router.HandlerFunc(http.MethodPost, hostPrefix+"/v1/transactions/_search",
-		middlewares.TokenAuthMiddleware(
-			middlewares.ContextMiddleware(controllers.GetTransactions, appContext)))
-
-	// Update data of accounts and transactions
-	router.HandlerFunc(http.MethodPut, hostPrefix+"/v1/accounts",
-		middlewares.TokenAuthMiddleware(
-			middlewares.ContextMiddleware(controllers.UpdateAccount, appContext)))
-	router.HandlerFunc(http.MethodPut, hostPrefix+"/v1/transactions",
-		middlewares.TokenAuthMiddleware(
-			middlewares.ContextMiddleware(controllers.UpdateTransaction, appContext)))
+	router := handler.NewRouter(hostPrefix, accCtrl, trCtrl)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -75,12 +54,6 @@ func main() {
 	}
 	log.Println("Running server on port:", port)
 	log.Fatal(http.ListenAndServe(":"+port, router))
-
-	defer func() {
-		if r := recover(); r != nil {
-			log.Println("Server exited!!!", r)
-		}
-	}()
 }
 
 func migrateDB(db *sql.DB) {

@@ -1,6 +1,16 @@
 package errors
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
+
+var (
+	ErrBadRequest = errors.New("bad request")
+	ErrInternal   = errors.New("internal error")
+	ErrConflict   = errors.New("conflict")
+	ErrNotFound   = errors.New("not found")
+)
 
 // TODO: Do we really need this ApplicationError interface ?
 // Can we just create named variables of type `error` like ErrorJSONInvalid, ErrorAccountConflict, etc.,

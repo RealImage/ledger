@@ -176,6 +176,9 @@ func convertFieldsToSQL(fields []map[string]map[string]interface{}) (where []str
 	for _, field := range fields {
 		var conditions []string
 		for key, comparison := range field {
+			if key == "id" {
+				key = "transaction.id"
+			}
 			for op, value := range comparison {
 				condn := fmt.Sprintf("%s %s ?", key, sqlComparisonOp(op))
 				conditions = append(conditions, condn)

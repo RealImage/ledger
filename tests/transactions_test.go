@@ -17,9 +17,8 @@ import (
 	"testing"
 	"time"
 
-	ledgerContext "github.com/RealImage/QLedger/context"
-	"github.com/RealImage/QLedger/controllers"
-	"github.com/RealImage/QLedger/middlewares"
+	"github.com/RealImage/QLedger/controller"
+	"github.com/RealImage/QLedger/handler"
 	"github.com/RealImage/QLedger/models"
 	_ "github.com/lib/pq"
 	"github.com/stretchr/testify/suite"
@@ -244,9 +243,17 @@ func VerifyExpectedBalance(endpoint string, accounts []map[string]interface{}) {
 
 type CSVSuite struct {
 	suite.Suite
-	context            *ledgerContext.AppContext
 	accountServer      *httptest.Server
 	transactionsServer *httptest.Server
+	db                 *sql.DB
+}
+
+type testHandler struct {
+	handler func(w http.ResponseWriter, r *http.Request)
+}
+
+func (t *testHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	t.handler(w, r)
 }
 
 func (cs *CSVSuite) SetupTest() {
@@ -257,9 +264,17 @@ func (cs *CSVSuite) SetupTest() {
 	}
 	log.Println("Successfully established connection to database.")
 	log.Println("Starting test endpoints...")
-	cs.context = &ledgerContext.AppContext{DB: db}
-	cs.accountServer = httptest.NewServer(middlewares.ContextMiddleware(controllers.GetAccounts, cs.context))
-	cs.transactionsServer = httptest.NewServer(middlewares.ContextMiddleware(controllers.MakeTransaction, cs.context))
+	cs.db = db
+	searchEngine, appErr := models.NewSearchEngine(db, models.SearchNamespaceTransactions)
+	if appErr != nil {
+		log.Panic(appErr)
+	}
+	accountsDB := models.NewAccountDB(db)
+	transactionsDB := models.NewTransactionDB(db)
+	ctrl := controller.NewController(searchEngine, &accountsDB, &transactionsDB)
+	h := handler.Service{Ctrl: ctrl}
+	cs.accountServer = httptest.NewServer(&testHandler{handler: h.GetAccounts})
+	cs.transactionsServer = httptest.NewServer(&testHandler{handler: h.MakeTransaction})
 }
 
 func (cs *CSVSuite) TestTransactionsLoad() {
@@ -274,15 +289,15 @@ func (cs *CSVSuite) TearDownTest() {
 
 	log.Println("Cleaning up the test database")
 	t := cs.T()
-	_, err := cs.context.DB.Exec(`DELETE FROM lines`)
+	_, err := cs.db.Exec(`DELETE FROM lines`)
 	if err != nil {
 		t.Fatal("Error deleting lines:", err)
 	}
-	_, err = cs.context.DB.Exec(`DELETE FROM transactions`)
+	_, err = cs.db.Exec(`DELETE FROM transactions`)
 	if err != nil {
 		t.Fatal("Error deleting transactions:", err)
 	}
-	_, err = cs.context.DB.Exec(`DELETE FROM accounts`)
+	_, err = cs.db.Exec(`DELETE FROM accounts`)
 	if err != nil {
 		t.Fatal("Error deleting accounts:", err)
 	}

@@ -1,4 +1,4 @@
-package controllers
+package handler
 
 import (
 	"bytes"
@@ -9,8 +9,8 @@ import (
 	"os"
 	"testing"
 
-	ledgerContext "github.com/RealImage/QLedger/context"
-	"github.com/RealImage/QLedger/middlewares"
+	"github.com/RealImage/QLedger/controller"
+	"github.com/RealImage/QLedger/models"
 
 	_ "github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
@@ -23,7 +23,8 @@ var (
 
 type TransactionsSuite struct {
 	suite.Suite
-	context *ledgerContext.AppContext
+	handler Service
+	db      *sql.DB
 }
 
 func (ts *TransactionsSuite) SetupSuite() {
@@ -35,7 +36,15 @@ func (ts *TransactionsSuite) SetupSuite() {
 		log.Panic("Unable to connect to Database:", err)
 	}
 	log.Println("Successfully established connection to database.")
-	ts.context = &ledgerContext.AppContext{DB: db}
+	ts.db = db
+	searchEngine, appErr := models.NewSearchEngine(db, models.SearchNamespaceTransactions)
+	if appErr != nil {
+		log.Panic(appErr)
+	}
+	accountsDB := models.NewAccountDB(db)
+	transactionsDB := models.NewTransactionDB(db)
+	ctrl := controller.NewController(searchEngine, &accountsDB, &transactionsDB)
+	ts.handler = Service{Ctrl: ctrl}
 }
 
 func (ts *TransactionsSuite) TestValidAndRepeatedTransaction() {
@@ -59,13 +68,12 @@ func (ts *TransactionsSuite) TestValidAndRepeatedTransaction() {
 	    "tag_two": "val2"
 	  }
 	}`
-	handler := middlewares.ContextMiddleware(MakeTransaction, ts.context)
 	req, err := http.NewRequest("POST", TransactionsAPI, bytes.NewBufferString(payload))
 	if err != nil {
 		t.Fatal(err)
 	}
 	rr1 := httptest.NewRecorder()
-	handler.ServeHTTP(rr1, req)
+	ts.handler.MakeTransaction(rr1, req)
 	assert.Equal(t, http.StatusCreated, rr1.Code, "Invalid response code")
 
 	// Duplicate transaction
@@ -74,7 +82,7 @@ func (ts *TransactionsSuite) TestValidAndRepeatedTransaction() {
 		t.Fatal(err)
 	}
 	rr2 := httptest.NewRecorder()
-	handler.ServeHTTP(rr2, req)
+	ts.handler.MakeTransaction(rr2, req)
 	assert.Equal(t, http.StatusAccepted, rr2.Code, "Invalid response code")
 
 	// Conflict transaction
@@ -96,7 +104,7 @@ func (ts *TransactionsSuite) TestValidAndRepeatedTransaction() {
 		t.Fatal(err)
 	}
 	rr3 := httptest.NewRecorder()
-	handler.ServeHTTP(rr3, req)
+	ts.handler.MakeTransaction(rr3, req)
 	assert.Equal(t, http.StatusConflict, rr3.Code, "Invalid response code")
 }
 
@@ -108,12 +116,11 @@ func (ts *TransactionsSuite) TestNoOpTransaction() {
 	  "lines": []
 	}`
 
-	handler := middlewares.ContextMiddleware(MakeTransaction, ts.context)
 	req, err := http.NewRequest("POST", TransactionsAPI, bytes.NewBufferString(payload))
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler.ServeHTTP(rr, req)
+	ts.handler.MakeTransaction(rr, req)
 
 	assert.Equal(t, http.StatusCreated, rr.Code, "Invalid response code")
 }
@@ -135,12 +142,11 @@ func (ts *TransactionsSuite) TestInvalidTransaction() {
 	  ]
 	}`
 
-	handler := middlewares.ContextMiddleware(MakeTransaction, ts.context)
 	req, err := http.NewRequest("POST", TransactionsAPI, bytes.NewBufferString(payload))
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler.ServeHTTP(rr, req)
+	ts.handler.MakeTransaction(rr, req)
 
 	assert.Equal(t, http.StatusBadRequest, rr.Code, "Invalid response code")
 }
@@ -152,12 +158,11 @@ func (ts *TransactionsSuite) TestBadTransaction() {
 		INVALID PAYLOAD
 	}`
 
-	handler := middlewares.ContextMiddleware(MakeTransaction, ts.context)
 	req, err := http.NewRequest("POST", TransactionsAPI, bytes.NewBufferString(payload))
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler.ServeHTTP(rr, req)
+	ts.handler.MakeTransaction(rr, req)
 
 	assert.Equal(t, http.StatusBadRequest, rr.Code, "Invalid response code")
 }
@@ -181,14 +186,20 @@ func (ts *TransactionsSuite) TestFailTransaction() {
 
 	// database is not available
 	db, _ := sql.Open("postgres", "")
-	invalidContext := &ledgerContext.AppContext{DB: db}
+	searchEngine, appErr := models.NewSearchEngine(db, models.SearchNamespaceTransactions)
+	if appErr != nil {
+		log.Panic(appErr)
+	}
+	accountsDB := models.NewAccountDB(db)
+	transactionsDB := models.NewTransactionDB(db)
+	ctrl := controller.NewController(searchEngine, &accountsDB, &transactionsDB)
+	h := Service{Ctrl: ctrl}
 
-	handler := middlewares.ContextMiddleware(MakeTransaction, invalidContext)
 	req, err := http.NewRequest("POST", TransactionsAPI, bytes.NewBufferString(payload))
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler.ServeHTTP(rr, req)
+	h.MakeTransaction(rr, req)
 
 	assert.Equal(t, http.StatusInternalServerError, rr.Code, "Invalid response code")
 }
@@ -214,13 +225,12 @@ func (ts *TransactionsSuite) TestCreateTransactionWithBoundaryValues() {
 	    "tag_two": "val2"
 	  }
 	}`
-	handler := middlewares.ContextMiddleware(MakeTransaction, ts.context)
 	req, err := http.NewRequest("POST", TransactionsAPI, bytes.NewBufferString(payload))
 	if err != nil {
 		t.Fatal(err)
 	}
 	rr1 := httptest.NewRecorder()
-	handler.ServeHTTP(rr1, req)
+	ts.handler.MakeTransaction(rr1, req)
 	assert.Equal(t, http.StatusCreated, rr1.Code, "Invalid response code")
 
 	// Out-of-boundary value transaction
@@ -241,13 +251,12 @@ func (ts *TransactionsSuite) TestCreateTransactionWithBoundaryValues() {
 	    "tag_two": "val2"
 	  }
 	}`
-	handler = middlewares.ContextMiddleware(MakeTransaction, ts.context)
 	req, err = http.NewRequest("POST", TransactionsAPI, bytes.NewBufferString(payload))
 	if err != nil {
 		t.Fatal(err)
 	}
 	rr1 = httptest.NewRecorder()
-	handler.ServeHTTP(rr1, req)
+	ts.handler.MakeTransaction(rr1, req)
 	assert.Equal(t, http.StatusBadRequest, rr1.Code, "Invalid response code")
 }
 
@@ -255,15 +264,15 @@ func (ts *TransactionsSuite) TearDownSuite() {
 	log.Println("Cleaning up the test database")
 
 	t := ts.T()
-	_, err := ts.context.DB.Exec(`DELETE FROM lines`)
+	_, err := ts.db.Exec(`DELETE FROM lines`)
 	if err != nil {
 		t.Fatal("Error deleting lines:", err)
 	}
-	_, err = ts.context.DB.Exec(`DELETE FROM transactions`)
+	_, err = ts.db.Exec(`DELETE FROM transactions`)
 	if err != nil {
 		t.Fatal("Error deleting transactions:", err)
 	}
-	_, err = ts.context.DB.Exec(`DELETE FROM accounts`)
+	_, err = ts.db.Exec(`DELETE FROM accounts`)
 	if err != nil {
 		t.Fatal("Error deleting accounts:", err)
 	}
